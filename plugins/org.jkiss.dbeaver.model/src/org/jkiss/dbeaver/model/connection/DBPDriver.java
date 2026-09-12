@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ package org.jkiss.dbeaver.model.connection;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.model.DBPDataSourceContainer;
 import org.jkiss.dbeaver.model.DBPDataSourceProvider;
 import org.jkiss.dbeaver.model.DBPImage;
 import org.jkiss.dbeaver.model.DBPNamedObject;
@@ -36,13 +37,13 @@ import java.util.Set;
 /**
  * DBPDriver
  */
-public interface DBPDriver extends DBPNamedObject
-{
+public interface DBPDriver extends DBPNamedObject, DBPDriverLibraryProvider {
+
     /**
      * Driver contributor
      */
     @NotNull
-    DBPDataSourceProvider getDataSourceProvider();
+    DBPDataSourceProvider<?> getDataSourceProvider();
 
     @NotNull
     DBPDataSourceProviderDescriptor getProviderDescriptor();
@@ -139,18 +140,12 @@ public interface DBPDriver extends DBPNamedObject
     boolean isTemporary();
 
     boolean isDisabled();
+    @Nullable
     DBPDriver getReplacedBy();
 
-    boolean isNotAvailable();
-
+    // Driver stub. If not null then this driver instance cannot be created
     @Nullable
-    String getNonAvailabilityTitle();
-
-    @Nullable
-    String getNonAvailabilityDescription();
-
-    @Nullable
-    String getNonAvailabilityReason();
+    DBPDriverStub getDriverStub();
 
     /**
      * @return a pair of providerId and driverId for each of driver replacement
@@ -195,27 +190,27 @@ public interface DBPDriver extends DBPNamedObject
     @NotNull
     List<DBPNativeClientLocation> getNativeClientLocations();
 
-    @Nullable
-    ClassLoader getClassLoader();
-
-    @NotNull
-    List<? extends DBPDriverLibrary> getDriverLibraries();
-
     @NotNull
     List<? extends DBPDriverFileSource> getDriverFileSources();
 
-    /**
-     * Flag that shows if a driver needs external dependencies (f.e. not all files are present).
-     */
-    boolean needsExternalDependencies();
+    @NotNull
+    DBPDriverLoader getDefaultDriverLoader();
 
     @NotNull
-    <T> T getDriverInstance(@NotNull DBRProgressMonitor monitor) throws DBException;
+    DBPDriverLoader getDriverLoader(@NotNull DBPDataSourceContainer dataSourceContainer);
 
-    void loadDriver(DBRProgressMonitor monitor) throws DBException;
+    @NotNull
+    List<DBPDriverLoader> getAllDriverLoaders();
+
+    void validateFilesPresence(
+        @NotNull DBRProgressMonitor monitor,
+        @NotNull DBPDataSourceContainer dataSourceContainer
+    ) throws DBException;
+
+    void resetDriverInstance();
 
     @Nullable
-    String getConnectionURL(DBPConnectionConfiguration configuration);
+    String getConnectionURL(DBPConnectionConfiguration configuration) throws DBException;
 
     /**
      * Create copy of
@@ -244,23 +239,14 @@ public interface DBPDriver extends DBPNamedObject
     }
 
     /**
-     * Validates driver library files presence and download them if needed without creating a driver instance
-     */
-    void validateFilesPresence(@NotNull DBRProgressMonitor monitor);
-
-
-    /**
-     * Indicates whether the driver library files are installed.
-     */
-    boolean isDriverInstalled();
-
-    /**
-     * Downloads driver library files from external resources if it is possible.
-     */
-    boolean downloadDriverLibraries(@NotNull DBRProgressMonitor monitor, boolean resetVersions);
-
-    /**
      * Compare driverId to this driver and its replacements
      */
     boolean matchesId(@NotNull String driverId);
+
+    /**
+     * Returns true if the driver supports virtual keys.
+     * @return true or false
+     */
+    boolean supportsVirtualKeys();
+
 }

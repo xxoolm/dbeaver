@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@
  */
 package org.jkiss.dbeaver.ui;
 
-import org.eclipse.ui.internal.progress.ProgressManager;
+import org.eclipse.ui.internal.Workbench;
+import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.model.app.DBPPlatformDesktop;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
-import org.jkiss.utils.ArrayUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,8 +33,9 @@ public class UIExecutionQueue {
 
     private static final List<Runnable> execQueue = new ArrayList<>();
     private static int runCount = 0;
+    private static volatile Runnable nextJob;
 
-    public static void queueExec(Runnable runnable) {
+    public static void queueExec(@NotNull Runnable runnable) {
         synchronized (execQueue) {
             execQueue.add(runnable);
         }
@@ -48,23 +49,28 @@ public class UIExecutionQueue {
     }
 
     public static void unblockQueue() {
+        boolean scheduleExecution;
         synchronized (execQueue) {
             if (runCount <= 0) {
                 throw new IllegalStateException("Queue is unblocked");
             }
             runCount--;
+            scheduleExecution = runCount == 0 && !execQueue.isEmpty();
+        }
+        if (scheduleExecution) {
+            UIUtils.asyncExec(UIExecutionQueue::executeInUI);
         }
     }
 
     private static void executeInUI() {
-        Runnable nextJob;
         synchronized (execQueue) {
             boolean workbenchStarted = DBWorkbench.getPlatform() instanceof DBPPlatformDesktop pd && pd.isWorkbenchStarted();
-            ProgressManager progressManager = ProgressManager.getInstance();
-            if (runCount > 0 || !workbenchStarted || !ArrayUtils.isEmpty(progressManager.getJobInfos(false))) {
-                // If workbench wasn't fully started or
-                // job is running or
-                // some Eclipse job is active in UI thread then retry later
+            if (runCount > 0) {
+                // The active job schedules the next one after it leaves any nested event loop and finishes.
+                return;
+            }
+            if (!workbenchStarted) {
+                // If workbench wasn't fully started then retry later
                 if (!DBWorkbench.getPlatform().isShuttingDown()) {
                     UIUtils.asyncExec(UIExecutionQueue::executeInUI);
                 }
@@ -74,12 +80,15 @@ public class UIExecutionQueue {
                 return;
             }
             runCount++;
-            nextJob = execQueue.remove(0);
+            nextJob = execQueue.removeFirst();
         }
         try {
-            nextJob.run();
+            if (!Workbench.getInstance().isClosing()) {
+                nextJob.run();
+            }
         } finally {
             synchronized (execQueue) {
+                nextJob = null;
                 runCount--;
             }
         }

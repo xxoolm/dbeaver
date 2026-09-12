@@ -35,8 +35,6 @@ public final class DBeaverPreferences
 
     public static final String CONFIRM_EXIT = "exit"; //$NON-NLS-1$
     public static final String CONFIRM_DRIVER_DOWNLOAD = "driver_download"; //$NON-NLS-1$
-    public static final String CONFIRM_DISABLE_NETWORK_HANDLER = "disable_network_handler"; //$NON-NLS-1$
-    public static final String CONFIRM_TEST_CONNECTION_PERSIST = "test_connection_persist"; //$NON-NLS-1$
 
     public static final String NAVIGATOR_EDITOR_FULL_NAME = DatabaseEditorPreferences.PROP_TITLE_SHOW_FULL_NAME; //$NON-NLS-1$
 
@@ -48,10 +46,10 @@ public final class DBeaverPreferences
     public static final String UI_KEEP_DATABASE_EDITORS = DatabaseEditorPreferences.PROP_SAVE_EDITORS_STATE; //$NON-NLS-1$
     public static final String UI_KEEP_DATABASE_EDITORS_ON_DISCONNECT = DatabaseEditorPreferences.PROP_KEEP_EDITORS_ON_DISCONNECT; //$NON-NLS-1$
     public static final String UI_DISCONNECT_ON_EDITORS_CLOSE = DatabaseEditorPreferences.PROP_DISCONNECT_ON_EDITORS_CLOSE; //$NON-NLS-1$
-    public static final String UI_USE_EMBEDDED_AUTH = "ui.use.redirect.auth"; //$NON-NLS-1$
     public static final String UI_SHOW_HOLIDAY_DECORATIONS = HolidayDecorations.PREF_UI_SHOW_HOLIDAY_DECORATIONS;
-    public static final String UI_STATUS_BAR_SHOW_BREADCRUMBS = "ui.statusBar.show.breadcrumbs"; //$NON-NLS-1$
+    public static final String UI_STATUS_BAR_SHOW_BREADCRUMBS = DatabaseEditorPreferences.UI_STATUS_BAR_SHOW_BREADCRUMBS;
     public static final String UI_STATUS_BAR_SHOW_STATUS_LINE = "ui.statusBar.show.statusLine"; //$NON-NLS-1$
+    public static final String UI_SHOW_ZOOM_RESTART_PROMPT = "ui.showZoomRestartPrompt"; //$NON-NLS-1$
 
     // Resources
     public static final String RESOURCE_HANDLER_ROOT_PREFIX = "resource.root."; //$NON-NLS-1$

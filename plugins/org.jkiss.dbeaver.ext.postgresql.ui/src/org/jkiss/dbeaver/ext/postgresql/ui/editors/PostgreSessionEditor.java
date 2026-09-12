@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2024 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@ import org.eclipse.jface.dialogs.IDialogSettings;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.ui.ISharedImages;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.ext.postgresql.model.session.PostgreSession;
 import org.jkiss.dbeaver.ext.postgresql.model.session.PostgreSessionManager;
 import org.jkiss.dbeaver.model.DBUtils;
 import org.jkiss.dbeaver.model.admin.sessions.DBAServerSession;
 import org.jkiss.dbeaver.model.admin.sessions.DBAServerSessionManager;
 import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
-import org.jkiss.dbeaver.ui.ActionUtils;
 import org.jkiss.dbeaver.ui.DBeaverIcons;
 import org.jkiss.dbeaver.ui.UIIcon;
 import org.jkiss.dbeaver.ui.UIUtils;
@@ -47,31 +48,36 @@ import java.util.Map;
 public class PostgreSessionEditor extends AbstractSessionEditor
 {
     private KillSessionAction terminateQueryAction;
+    private CancelQueryAction cancelQueryAction;
     private boolean showIdle = true;
 
     @Override
     public void createEditorControl(Composite parent) {
         terminateQueryAction = new KillSessionAction();
+        cancelQueryAction = new CancelQueryAction();
         super.createEditorControl(parent);
     }
 
+    @NotNull
     @Override
-    protected SessionManagerViewer createSessionViewer(DBCExecutionContext executionContext, Composite parent) {
+    protected SessionManagerViewer<?> createSessionViewer(@NotNull DBCExecutionContext executionContext, @NotNull Composite parent) {
         DBAServerSessionManager sessionManager = DBUtils.getAdapter(DBAServerSessionManager.class, executionContext.getDataSource());
         return new SessionManagerViewer<PostgreSession>(this, parent, sessionManager) {
             @Override
-            protected void contributeToToolbar(DBAServerSessionManager sessionManager, IContributionManager contributionManager)
+            protected void contributeToToolbar(@NotNull DBAServerSessionManager<?> sessionManager, @NotNull IContributionManager contributionManager)
             {
                 contributionManager.add(new ShowIdleAction());
                 contributionManager.add(new Separator());
                 contributionManager.add(terminateQueryAction);
+                contributionManager.add(cancelQueryAction);
                 contributionManager.add(new Separator());
             }
 
             @Override
-            protected void onSessionSelect(DBAServerSession session) {
+            protected void onSessionSelect(@Nullable DBAServerSession session) {
                 super.onSessionSelect(session);
                 terminateQueryAction.setEnabled(session != null);
+                cancelQueryAction.setEnabled(session != null);
             }
             
             @Override
@@ -111,6 +117,29 @@ public class PostgreSessionEditor extends AbstractSessionEditor
         public void run() {
             showIdle = isChecked();
             refreshPart(PostgreSessionEditor.this, true);
+        }
+    }
+    private class CancelQueryAction extends Action {
+        CancelQueryAction() {
+            super(
+                "Cancel query",
+                UIUtils.getShardImageDescriptor(ISharedImages.IMG_ELCL_STOP));
+            setToolTipText("Cancel query");
+        }
+        @Override
+        public void run() {
+            final List<DBAServerSession> sessions = getSessionsViewer().getSelectedSessions();
+            if (sessions != null && UIUtils.confirmAction(
+                getSite().getShell(),
+                this.getText(),
+                NLS.bind("Cancel query of session {0}?", sessions)))
+            {
+                Map<String, Object> options = new HashMap<String,Object>();
+                options.put(PostgreSessionManager.OPTION_QUERY_CANCEL, true);
+                getSessionsViewer().alterSessions(
+                    sessions,
+                    options);
+            }
         }
     }
 

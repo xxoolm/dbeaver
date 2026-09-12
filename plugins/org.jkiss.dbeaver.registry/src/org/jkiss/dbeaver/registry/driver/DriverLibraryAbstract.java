@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import org.jkiss.dbeaver.model.connection.DBPDriverLibrary;
 import org.jkiss.dbeaver.model.fs.DBFUtils;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.runtime.OSDescriptor;
+import org.jkiss.dbeaver.model.runtime.OSDescriptorMatch;
 import org.jkiss.dbeaver.registry.RegistryConstants;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.runtime.WebUtils;
@@ -45,7 +46,9 @@ import java.util.Collections;
 public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
     private static final Log log = Log.getLog(DriverLibraryAbstract.class);
 
+    @Nullable
     protected final DriverDescriptor driver;
+    @NotNull
     protected final FileType type;
     protected final OSDescriptor system;
     protected String path;
@@ -55,11 +58,18 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
     protected boolean disabled;
     protected long fileCRC;
 
-    public static DriverLibraryAbstract createFromPath(DriverDescriptor driver, FileType type, String path, String preferredVersion) {
+    public static DriverLibraryAbstract createFromPath(
+        @NotNull  DriverDescriptor driver,
+        @NotNull FileType type,
+        @NotNull String path,
+        @Nullable String preferredVersion
+    ) {
         if (path.startsWith(DriverLibraryRepository.PATH_PREFIX)) {
             return new DriverLibraryRepository(driver, type, path);
         } else if (path.startsWith(DriverLibraryMavenArtifact.PATH_PREFIX)) {
             return new DriverLibraryMavenArtifact(driver, type, path, preferredVersion);
+        } else if (path.startsWith(DriverLibraryBundle.PATH_PREFIX)) {
+            return new DriverLibraryBundle(driver, path);
         } else {
             if (DriverLibraryRemote.supportsURL(path)) {
                 return new DriverLibraryRemote(driver, type, path);
@@ -69,7 +79,10 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         }
     }
 
-    public static DriverLibraryAbstract createFromConfig(DriverDescriptor driver, IConfigurationElement config) {
+    public static DriverLibraryAbstract createFromConfig(
+        @Nullable DriverDescriptor driver,
+        @NotNull IConfigurationElement config
+    ) {
         String path = config.getAttribute(RegistryConstants.ATTR_PATH);
         if (CommonUtils.isEmpty(path)) {
             log.error("Bad file path");
@@ -85,6 +98,8 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
             return new DriverLibraryRepository(driver, config);
         } else if (path.startsWith(DriverLibraryMavenArtifact.PATH_PREFIX)) {
             return new DriverLibraryMavenArtifact(driver, config);
+        } else if (path.startsWith(DriverLibraryBundle.PATH_PREFIX)) {
+            return new DriverLibraryBundle(driver, config);
         } else {
             if (DriverLibraryRemote.supportsURL(path)) {
                 return new DriverLibraryRemote(driver, config);
@@ -94,7 +109,7 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         }
     }
 
-    protected DriverLibraryAbstract(DriverDescriptor driverDescriptor, DriverLibraryAbstract copyFrom) {
+    protected DriverLibraryAbstract(@NotNull  DriverDescriptor driverDescriptor, @NotNull DriverLibraryAbstract copyFrom) {
         this.driver = driverDescriptor;
         this.type = copyFrom.type;
         this.system = copyFrom.system;
@@ -105,7 +120,7 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         this.disabled = copyFrom.disabled;
     }
 
-    protected DriverLibraryAbstract(DriverDescriptor driver, FileType type, String path) {
+    protected DriverLibraryAbstract(@NotNull  DriverDescriptor driver, @NotNull FileType type, @NotNull String path) {
         this.driver = driver;
         this.type = type;
         this.system = null;
@@ -113,7 +128,7 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         this.custom = true;
     }
 
-    protected DriverLibraryAbstract(DriverDescriptor driver, IConfigurationElement config) {
+    protected DriverLibraryAbstract(@Nullable DriverDescriptor driver, @NotNull IConfigurationElement config) {
         this.driver = driver;
         String typeStr = config.getAttribute(RegistryConstants.ATTR_TYPE);
         if ("zip".equalsIgnoreCase(typeStr)) {
@@ -122,19 +137,22 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         this.type = FileType.valueOf(typeStr);
 
         String osName = config.getAttribute(RegistryConstants.ATTR_OS);
-        this.system = osName == null ? null : new OSDescriptor(
+        this.system = osName == null ? null : new OSDescriptorMatch(
             osName,
-            config.getAttribute(RegistryConstants.ATTR_ARCH));
+            config.getAttribute(RegistryConstants.ATTR_ARCH),
+            CommonUtils.getBoolean(config.getAttribute(RegistryConstants.ATTR_EXCLUDE), false));
         this.path = config.getAttribute(RegistryConstants.ATTR_PATH);
         this.embedded = CommonUtils.getBoolean(config.getAttribute(RegistryConstants.ATTR_EMBEDDED), false);
         this.optional = CommonUtils.getBoolean(config.getAttribute(RegistryConstants.ATTR_OPTIONAL), false);
         this.custom = false;
     }
 
+    @Nullable
     public DriverDescriptor getDriver() {
         return driver;
     }
 
+    @Nullable
     @Override
     public String getVersion() {
         return null;
@@ -146,14 +164,10 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         return Collections.emptyList();
     }
 
+    @Nullable
     @Override
     public String getPreferredVersion() {
         return null;
-    }
-
-    @Override
-    public void setPreferredVersion(@NotNull String version) {
-        // do nothing
     }
 
     @Override
@@ -206,6 +220,7 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         return disabled;
     }
 
+    @Override
     public void setDisabled(boolean disabled) {
         this.disabled = disabled;
     }
@@ -220,7 +235,11 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         return system == null || system.matches(DBWorkbench.getPlatform().getLocalSystem());
     }
 
-    public void downloadLibraryFile(@NotNull DBRProgressMonitor monitor, boolean forceUpdate, String taskName) throws IOException, InterruptedException {
+    public void downloadLibraryFile(
+        @NotNull DBRProgressMonitor monitor,
+        boolean forceUpdate,
+        @NotNull String taskName
+    ) throws IOException, InterruptedException {
         final Path localFile = getLocalFile();
         if (localFile == null) {
             throw new IOException("No target file for '" + getPath() + "'");
@@ -245,7 +264,7 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         final Path tempFile = tempFolder.resolve(SecurityUtils.makeDigest(localFile.toString()));
 
         WebUtils.downloadRemoteFile(monitor, taskName, externalURL, tempFile, getAuthInfo(monitor));
-        this.fileCRC = DriverDescriptor.calculateFileCRC(tempFile);
+        this.fileCRC = DriverUtils.calculateFileCRC(tempFile);
         if (DBWorkbench.isDistributed()) {
             // save driver library file using file controller
             try {
@@ -285,5 +304,6 @@ public abstract class DriverLibraryAbstract implements DBPDriverLibrary {
         return getId().hashCode();
     }
 
-    public abstract DBPDriverLibrary copyLibrary(DriverDescriptor driverDescriptor);
+    @NotNull
+    public abstract DBPDriverLibrary copyLibrary(@NotNull DriverDescriptor driverDescriptor);
 }

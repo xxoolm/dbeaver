@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,17 @@ package org.jkiss.dbeaver.ui.app.standalone.tipoftheday;
 
 import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.jface.dialogs.IDialogSettings;
-import org.eclipse.jface.resource.JFaceResources;
+import org.eclipse.jface.layout.GridDataFactory;
+import org.eclipse.jface.layout.GridLayoutFactory;
+import org.eclipse.jface.resource.JFaceColors;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.custom.StyleRange;
+import org.eclipse.swt.custom.StyledText;
+import org.eclipse.swt.events.MouseListener;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.FontData;
+import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
@@ -31,75 +36,63 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.PartInitException;
-import org.eclipse.ui.forms.events.HyperlinkAdapter;
-import org.eclipse.ui.forms.events.HyperlinkEvent;
-import org.eclipse.ui.forms.widgets.Form;
-import org.eclipse.ui.forms.widgets.FormText;
-import org.eclipse.ui.forms.widgets.FormToolkit;
-import org.eclipse.ui.forms.widgets.ScrolledFormText;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.Log;
-import org.jkiss.dbeaver.model.DBIcon;
+import org.jkiss.dbeaver.model.preferences.DBPPreferenceStore;
+import org.jkiss.dbeaver.model.stm.STMUtils;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.dbeaver.ui.BaseThemeSettings;
 import org.jkiss.dbeaver.ui.ShellUtils;
 import org.jkiss.dbeaver.ui.UIUtils;
-import org.jkiss.dbeaver.ui.dialogs.BaseDialog;
+import org.jkiss.dbeaver.ui.dialogs.AbstractPopupPanel;
+import org.jkiss.dbeaver.utils.RuntimeUtils;
+import org.jkiss.utils.CommonUtils;
 
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
-public class ShowTipOfTheDayDialog extends BaseDialog {
+public class ShowTipOfTheDayDialog extends AbstractPopupPanel {
+    private static final String UI_SHOW_TIP_OF_THE_DAY_ON_STARTUP = "ui.show.tip.of.the.day.on.startup";
     private static final Log log = Log.getLog(ShowTipOfTheDayDialog.class);
 
     private static final String DIALOG_ID = "DBeaver." + ShowTipOfTheDayDialog.class.getSimpleName();
 
-    private final List<String> tips = new ArrayList<>();
-    private Composite tipArea;
+    private final List<Tip> tips;
     private boolean displayShowOnStartup;
-    private boolean showOnStartup;
-    private ScrolledFormText scrolledFormText;
+    private StyledText tipText;
+    private List<LinkRange> links = List.of();
     private int tipIndex;
 
-    public ShowTipOfTheDayDialog(Shell parentShell) {
-        super(parentShell, "Tip of the day", DBIcon.TREE_INFO);
+    public ShowTipOfTheDayDialog(@NotNull Shell parentShell, @NotNull List<Tip> tips) {
+        super(parentShell, TipOfTheDayMessages.tip_of_the_day_title);
+        this.tips = List.copyOf(tips);
+        setModeless(true);
+        setBlockOnOpen(false);
     }
 
+    public static boolean isShowOnStartup() {
+        DBPPreferenceStore store = DBWorkbench.getPlatform().getPreferenceStore();
+        return CommonUtils.toBoolean(store.getString(UI_SHOW_TIP_OF_THE_DAY_ON_STARTUP), true);
+    }
+
+    public static void setShowOnStartup(boolean showOnStartup) {
+        DBPPreferenceStore store = DBWorkbench.getPlatform().getPreferenceStore();
+        store.setValue(UI_SHOW_TIP_OF_THE_DAY_ON_STARTUP, String.valueOf(showOnStartup));
+    }
+
+    @Nullable
     @Override
-    protected IDialogSettings getDialogBoundsSettings()
-    {
+    protected IDialogSettings getDialogBoundsSettings() {
         return UIUtils.getDialogSettings(DIALOG_ID);
     }
 
-    public void addTip(String tip) {
-        this.tips.add(tip);
-    }
-
+    @NotNull
     @Override
-    protected Control createContents(Composite parent) {
-        //[dbeaver/dbeaver#11526]
-        Control contents = super.createContents(parent);
-        UIUtils.asyncExec(() -> {
-            if (!tipArea.isDisposed()) {
-                tipArea.layout();
-            }
-        });
-        return contents;
-    }
+    protected Composite createDialogArea(@NotNull Composite parent) {
+        getShell().setText(TipOfTheDayMessages.tip_of_the_day_title);
 
-    @Override
-    protected Composite createDialogArea(Composite parent) {
-        getShell().setText("Tip of the day");
-        setTitle("Tip of the day");
-
-        if (tips.isEmpty()) {
-            tips.add("Empty tip list");
-        }
-
-        tipIndex = new Random(System.currentTimeMillis()).nextInt(tips.size());
-
-
-        Font dialogFont = JFaceResources.getDialogFont();
+        Font dialogFont = BaseThemeSettings.instance.baseFont;
         FontData[] fontData = dialogFont.getFontData();
         for (int i = 0; i < fontData.length; i++) {
             FontData fd = fontData[i];
@@ -108,76 +101,55 @@ public class ShowTipOfTheDayDialog extends BaseDialog {
         Font largeFont = new Font(dialogFont.getDevice(), fontData);
         parent.addDisposeListener(e -> largeFont.dispose());
 
+        this.tipIndex = new Random(System.currentTimeMillis()).nextInt(this.tips.size());
+
         Composite dialogArea = super.createDialogArea(parent);
 
-        tipArea = new Composite(dialogArea, SWT.BORDER);
+        Composite tipArea = new Composite(dialogArea, SWT.BORDER);
         tipArea.setLayoutData(new GridData(GridData.FILL_BOTH));
-        GridLayout gl = new GridLayout(1, false);
-        gl.marginWidth = 0;
-        gl.marginHeight = 0;
-        tipArea.setLayout(gl);
+        tipArea.setLayout(GridLayoutFactory.fillDefaults().create());
 
-        FormToolkit toolkit = new FormToolkit(parent.getDisplay());
-        toolkit.setBorderStyle(SWT.NULL);
-        Form form = toolkit.createForm(tipArea);
-        form.setLayoutData(new GridData(GridData.FILL_BOTH));
-        form.setLayout(new GridLayout(1, true));
-        //form.setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TEXT_BORDER);
-        form.getBody().setLayoutData(new GridData(GridData.FILL_BOTH));
-        form.getBody().setLayout(new GridLayout(1, true));
-
-        scrolledFormText = new ScrolledFormText(form.getBody(), SWT.V_SCROLL, false);
-        FormText formText = new FormText(scrolledFormText, SWT.WRAP | SWT.NO_FOCUS);
-        scrolledFormText.setFormText(formText);
-        scrolledFormText.setExpandVertical(true);
-        scrolledFormText.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-        toolkit.adapt(scrolledFormText);
-        formText.marginWidth = 1;
-        formText.marginHeight = 0;
-        formText.setHyperlinkSettings(toolkit.getHyperlinkGroup());
-        toolkit.adapt(formText, false, false);
-        formText.setMenu(form.getBody().getMenu());
-
-            //toolkit.createFormText(form.getBody(), false);
-        GridData gd = new GridData(GridData.FILL_BOTH);
-        gd.widthHint = 300;
-        gd.heightHint = 100;
-        formText.setLayoutData(gd);
-        formText.setFont(largeFont);
-        formText.addHyperlinkListener(new HyperlinkAdapter() {
-            @Override
-            public void linkActivated(HyperlinkEvent e) {
-                navigateLink(e);
+        this.tipText = new StyledText(tipArea, SWT.READ_ONLY | SWT.WRAP | SWT.V_SCROLL | SWT.NO_FOCUS);
+        this.tipText.setLayoutData(GridDataFactory.fillDefaults().grab(true, true).hint(300, 100).create());
+        this.tipText.setMargins(5, 5, 5, 5);
+        this.tipText.setFont(largeFont);
+        this.tipText.addMouseListener(MouseListener.mouseUpAdapter(e -> {
+            LinkRange link = this.getLinkAt(new Point(e.x, e.y));
+            if (link != null) {
+                this.navigateLink(link.href());
             }
+        }));
+        this.tipText.addMouseMoveListener(e -> {
+            LinkRange link = this.getLinkAt(new Point(e.x, e.y));
+            this.tipText.setCursor(link == null ? null : this.tipText.getDisplay().getSystemCursor(SWT.CURSOR_HAND));
         });
         showTip();
 
-        if (displayShowOnStartup) {
-            Button showTipButton = toolkit.createButton(form.getBody(), "Show tips on startup", SWT.CHECK);
-            showTipButton.setSelection(showOnStartup);
-            showTipButton.addSelectionListener(new SelectionAdapter() {
-                @Override
-                public void widgetSelected(SelectionEvent e) {
-                    showOnStartup = showTipButton.getSelection();
-                }
-            });
+        if (this.displayShowOnStartup) {
+            Button showTipButton = UIUtils.createCheckbox(
+                dialogArea,
+                TipOfTheDayMessages.show_tips_on_startup,
+                isShowOnStartup()
+            );
 
-            form.getBody().setTabList(new Control[] { showTipButton });
+            showTipButton.addSelectionListener(SelectionListener.widgetSelectedAdapter(e ->
+                setShowOnStartup(showTipButton.getSelection())));
         }
 
         return dialogArea;
     }
 
-    private void navigateLink(HyperlinkEvent e) {
-        final Object href = e.getHref();
-        if (href == null) {
-            return;
-        }
-        final URI uri = URI.create(href.toString());
+    @Override
+    protected boolean needsButtonBar() {
+        return true;
+    }
+
+    private void navigateLink(@NotNull String href) {
+        final URI uri = URI.create(href);
         switch (uri.getScheme()) {
             case "http":
             case "https":
-                ShellUtils.launchProgram(href.toString());
+                ShellUtils.launchProgram(href);
                 break;
             case "prefs":
                 close();
@@ -213,17 +185,56 @@ public class ShowTipOfTheDayDialog extends BaseDialog {
     }
 
     private void showTip() {
-        String tipText = "<form><p>" + tips.get(tipIndex) + "</p></form>";
-        try {
-            scrolledFormText.getFormText().setText(tipText, true, false);
-            scrolledFormText.reflow(true);
-        } catch (Exception e) {
-            log.error(e);
+        Tip tip = this.tips.get(this.tipIndex);
+        List<StyleRange> styles = new ArrayList<>();
+        List<LinkRange> parsedLinks = new ArrayList<>();
+        for (Tip.Style tipStyle : tip.styles()) {
+            int fontStyle = SWT.NORMAL;
+            if (tipStyle.bold()) {
+                fontStyle |= SWT.BOLD;
+            }
+            if (tipStyle.italic()) {
+                fontStyle |= SWT.ITALIC;
+            }
+            StyleRange style = new StyleRange(tipStyle.start(), tipStyle.length(), null, null, fontStyle);
+            style.underline = tipStyle.underline() || tipStyle.href() != null;
+            style.underlineStyle = tipStyle.href() != null ? SWT.UNDERLINE_LINK : SWT.UNDERLINE_SINGLE;
+            if (tipStyle.href() != null) {
+                style.foreground = JFaceColors.getHyperlinkText(this.tipText.getDisplay());
+                parsedLinks.add(new LinkRange(
+                    tipStyle.start(),
+                    tipStyle.start() + tipStyle.length(),
+                    tipStyle.href()
+                ));
+            }
+            styles.add(style);
         }
+        this.tipText.setText(tip.text());
+        this.tipText.setStyleRanges(styles.toArray(StyleRange[]::new));
+        parsedLinks.sort(Comparator.comparingInt(LinkRange::start)); // links are already sorted implicitly, so just ensure - its fast
+        this.links = parsedLinks;
+        this.tipText.setTopIndex(0);
+    }
+
+    @Nullable
+    private LinkRange getLinkAt(@NotNull Point point) {
+        int offset = this.tipText.getOffsetAtPoint(point);
+        if (offset < 0) {
+            return null;
+        }
+        int index = STMUtils.binarySearchByKey(this.links, LinkRange::start, offset, Integer::compare);
+        if (index < 0) {
+            index = ~index - 1;
+        }
+        if (index < 0) {
+            return null;
+        }
+        LinkRange link = this.links.get(index);
+        return offset < link.end() ? link : null;
     }
 
     @Override
-    protected void createButtonsForButtonBar(Composite parent) {
+    protected void createButtonsForButtonBar(@NotNull Composite parent) {
         createButton(parent, IDialogConstants.BACK_ID, IDialogConstants.BACK_LABEL, false);
         createButton(parent, IDialogConstants.NEXT_ID, IDialogConstants.NEXT_LABEL, false);
         createButton(parent, IDialogConstants.OK_ID, IDialogConstants.CLOSE_LABEL, true);
@@ -253,19 +264,10 @@ public class ShowTipOfTheDayDialog extends BaseDialog {
         super.buttonPressed(buttonId);
     }
 
-    public boolean isDisplayShowOnStartup() {
-        return displayShowOnStartup;
-    }
-
     public void setDisplayShowOnStartup(boolean displayShowOnStartup) {
         this.displayShowOnStartup = displayShowOnStartup;
     }
 
-    public boolean isShowOnStartup() {
-        return showOnStartup;
-    }
-
-    public void setShowOnStartup(boolean showOnStartup) {
-        this.showOnStartup = showOnStartup;
+    private record LinkRange(int start, int end, @NotNull String href) {
     }
 }

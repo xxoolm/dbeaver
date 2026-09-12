@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,8 +41,10 @@ import org.eclipse.swt.events.ControlAdapter;
 import org.eclipse.swt.events.ControlEvent;
 import org.eclipse.swt.events.MouseAdapter;
 import org.eclipse.swt.events.MouseEvent;
+import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.PlatformUI;
@@ -253,9 +255,13 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
     static long getBigScriptFileLengthBoundary() {
         return DBWorkbench.getPlatform().getPreferenceStore().getLong(SQLPreferenceConstants.SCRIPT_BIG_FILE_LENGTH_BOUNDARY);
     }
-    
+
     static boolean isReadEmbeddedBinding() {
         return DBWorkbench.getPlatform().getPreferenceStore().getBoolean(SQLPreferenceConstants.SCRIPT_BIND_EMBEDDED_READ);
+    }
+
+    static boolean isConfirmReadEmbeddedBinding() {
+        return DBWorkbench.getPlatform().getPreferenceStore().getBoolean(SQLPreferenceConstants.SCRIPT_BIND_EMBEDDED_READ_CONFIRM);
     }
 
     static boolean isWriteEmbeddedBinding() {
@@ -264,12 +270,6 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
 
     public boolean isAdvancedHighlightingEnabled() {
         return this.getActivePreferenceStore().getBoolean(SQLModelPreferences.ADVANCED_HIGHLIGHTING_ENABLE);
-    }
-
-    public boolean isReadMetadataForQueryAnalysisEnabled() {
-        DBPPreferenceStore prefStore = this.getActivePreferenceStore();
-        return prefStore.getBoolean(SQLModelPreferences.READ_METADATA_FOR_SEMANTIC_ANALYSIS)
-            && !prefStore.getBoolean(ModelPreferences.META_DISABLE_EXTRA_READ);
     }
 
     private void handleInputChange(IEditorInput input) {
@@ -286,8 +286,7 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
         return new String[]{
             TEXT_EDITOR_CONTEXT,
             SQLEditorContributions.SQL_EDITOR_CONTEXT,
-            SQLEditorContributions.SQL_EDITOR_SCRIPT_CONTEXT,
-            SQLEditorContributions.SQL_EDITOR_CONTROL_CONTEXT};
+            SQLEditorContributions.SQL_EDITOR_SCRIPT_CONTEXT};
     }
 
     @Override
@@ -298,6 +297,7 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
         setRulerContextMenuId(SQLEditorContributions.SQL_RULER_CONTEXT_MENU_ID);
     }
 
+    @Nullable
     public DBPDataSource getDataSource() {
         DBCExecutionContext context = getExecutionContext();
         return context == null ? null : context.getDataSource();
@@ -366,7 +366,7 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
     }
 
     @Override
-    public void createPartControl(Composite parent) {
+    public void createPartControl(@NotNull Composite parent) {
         setRangeIndicator(new DefaultRangeIndicator());
 
         editorControl = new SQLEditorControl(parent, this);
@@ -395,16 +395,13 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
 
             loadActivePreferenceSettings();
 
-            if (sourceViewer instanceof ITextViewerExtension) {
+            if (sourceViewer instanceof ITextViewerExtension && sqlSymbolInserter != null) {
                 ((ITextViewerExtension) sourceViewer).prependVerifyKeyListener(sqlSymbolInserter);
             }
         }
 
         if (sourceViewer != null) {
             final StyledText widget = sourceViewer.getTextWidget();
-
-            // Context listener
-            EditorUtils.trackControlContext(getSite(), widget, SQLEditorContributions.SQL_EDITOR_CONTROL_CONTEXT);
 
             // Mouse listener that moves cursor upon clicking with the right mouse button
             widget.addMouseListener(new MouseAdapter() {
@@ -552,6 +549,28 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
         return UIUtils.getSharedTextColors();
     }
 
+    protected void updateVerticalRulerColors() {
+        if (!UIStyles.isDarkTheme()) {
+            return;
+        }
+        IVerticalRuler verticalRuler = getVerticalRuler();
+        if (verticalRuler == null) {
+            return;
+        }
+        Control rulerControl = verticalRuler.getControl();
+        if (rulerControl == null || rulerControl.isDisposed()) {
+            return;
+        }
+        Color background = UIStyles.getDefaultTextBackground();
+        rulerControl.setBackground(background);
+        if (rulerControl instanceof Composite composite) {
+            // Each ruler column owns a canvas that does not inherit the background on its own
+            for (Control column : composite.getChildren()) {
+                column.setBackground(background);
+            }
+        }
+    }
+
     @Override
     protected void doSetInput(IEditorInput input) throws CoreException {
         if (getDocumentProvider() instanceof NonFileDocumentProvider) {
@@ -649,7 +668,8 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
             overviewRuler,
             true,
             styles,
-            this::getActivePreferenceStore
+            this::getActivePreferenceStore,
+            this
         );
     }
 
@@ -788,7 +808,7 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
     }
 
     @Override
-    public void editorContextMenuAboutToShow(IMenuManager menu) {
+    public void editorContextMenuAboutToShow(@NotNull IMenuManager menu) {
         menu.add(new GroupMarker(GROUP_SQL_ADDITIONS));
 
         super.editorContextMenuAboutToShow(menu);
@@ -809,6 +829,8 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
             formatMenu.add(getAction(ITextEditorActionConstants.UPPER_CASE));
             formatMenu.add(getAction(ITextEditorActionConstants.LOWER_CASE));
             formatMenu.add(ActionUtils.makeCommandContribution(getSite(), "org.jkiss.dbeaver.ui.editors.sql.trim.spaces"));
+            formatMenu.add(ActionUtils.makeCommandContribution(getSite(), "org.jkiss.dbeaver.ui.editors.sql.trim.leading.spaces"));
+            formatMenu.add(ActionUtils.makeCommandContribution(getSite(), "org.jkiss.dbeaver.ui.editors.sql.trim.trailing.spaces"));
             formatMenu.add(new Separator());
             formatMenu.add(ActionUtils.makeCommandContribution(getSite(), "org.jkiss.dbeaver.ui.editors.sql.word.wrap"));
             formatMenu.add(ActionUtils.makeCommandContribution(getSite(), "org.jkiss.dbeaver.ui.editors.sql.comment.single"));
@@ -947,7 +969,7 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
     }
 
     public SQLScriptElement extractQueryAtPos(int currentPos) {
-        return parserContext == null ? null : SQLScriptParser.extractQueryAtPos(parserContext, currentPos);
+        return parserContext == null ? null : SQLScriptParser.extractQueryAtPos(parserContext, currentPos, false);
     }
 
     public SQLScriptElement extractNextQuery(boolean next) {
@@ -1379,5 +1401,4 @@ public abstract class SQLEditorBase extends BaseTextEditor implements
             return editorInput.isReadOnly();
         }
     }
-
 }

@@ -19,99 +19,42 @@ package org.jkiss.dbeaver.ui.app.standalone.tipoftheday;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
-import org.eclipse.core.runtime.FileLocator;
-import org.eclipse.core.runtime.Platform;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.handlers.HandlerUtil;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.Log;
-import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.utils.CommonUtils;
-import org.xml.sax.SAXException;
 
-import javax.xml.XMLConstants;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 public class ShowTipOfTheDayHandler extends AbstractHandler {
 
     private static final Log log = Log.getLog(ShowTipOfTheDayHandler.class);
 
-    public static final String UI_SHOW_TIP_OF_THE_DAY_ON_STARTUP = "ui.show.tip.of.the.day.on.startup";
-
-    static void showTipOfTheDay(IWorkbenchWindow window) {
-        List<String> tips = loadTips();
+    static void showTipOfTheDay(@NotNull IWorkbenchWindow window) {
+        if (UIUtils.isWindowVisible(window.getShell().getDisplay(), ShowTipOfTheDayDialog.class)) {
+            return;
+        }
+        List<Tip> tips = TipsXmlHandler.loadTips();
         if (!CommonUtils.isEmpty(tips)) {
             showTipOfTheDayDialog(tips, window);
         }
     }
 
-    private static void showTipOfTheDayDialog(List<String> tips, IWorkbenchWindow window) {
-        ShowTipOfTheDayDialog tipDialog = new ShowTipOfTheDayDialog(window.getShell());
+    private static void showTipOfTheDayDialog(@NotNull List<Tip> tips, @NotNull IWorkbenchWindow window) {
+        if (tips.isEmpty()) {
+            return;
+        }
+        ShowTipOfTheDayDialog tipDialog = new ShowTipOfTheDayDialog(window.getShell(), tips);
         tipDialog.setDisplayShowOnStartup(true);
-        tipDialog.setShowOnStartup(
-            CommonUtils.getBoolean(
-                DBWorkbench.getPlatform().getPreferenceStore().getString(UI_SHOW_TIP_OF_THE_DAY_ON_STARTUP), true));
-
-        for (String tip : tips) {
-            tipDialog.addTip(tip);
-        }
-
         tipDialog.open();
-
-        DBWorkbench.getPlatform().getPreferenceStore().
-            setValue(UI_SHOW_TIP_OF_THE_DAY_ON_STARTUP, String.valueOf(tipDialog.isShowOnStartup()));
     }
 
-    private static List<String> loadTips() {
-        List<String> result = new ArrayList<>();
-
-        String pathToTipsFile = Platform.getProduct().getProperty("tipsFile");
-        if (pathToTipsFile == null) {
-            return result;
-        }
-
-        URL url;
-        try {
-            url = FileLocator.find(new URL(pathToTipsFile));
-        } catch (MalformedURLException e) {
-            log.debug(e);
-            return null;
-        }
-        if (url != null) {
-            try (InputStream tipsInputStream = url.openConnection().getInputStream()) {
-
-                SAXParserFactory factory = SAXParserFactory.newInstance();
-                factory.setFeature( XMLConstants.FEATURE_SECURE_PROCESSING, true );
-
-                SAXParser saxParser = factory.newSAXParser();
-
-
-                TipsXmlHandler handler = new TipsXmlHandler();
-                saxParser.parse(tipsInputStream, handler);
-                result.addAll(handler.getTips());
-
-            } catch (SAXException | ParserConfigurationException e) {
-                log.error("Unable to parse tips file:", e);
-            } catch (IOException ioe) {
-                log.error("Tips file wasn't found", ioe);
-            }
-            if (!result.isEmpty() && result.size() > 1) {
-                Collections.shuffle(result);
-            }
-        }
-        return result;
-    }
-
+    @Nullable
     @Override
-    public Object execute(ExecutionEvent event) throws ExecutionException {
+    public Object execute(@NotNull ExecutionEvent event) throws ExecutionException {
         showTipOfTheDay(HandlerUtil.getActiveWorkbenchWindow(event));
         return null;
     }

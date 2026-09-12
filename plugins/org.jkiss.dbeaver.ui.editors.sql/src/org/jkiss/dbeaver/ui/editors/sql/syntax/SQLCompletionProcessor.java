@@ -1,6 +1,6 @@
 /*
  * DBeaver - Universal Database Manager
- * Copyright (C) 2010-2025 DBeaver Corp and others
+ * Copyright (C) 2010-2026 DBeaver Corp and others
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,23 +29,27 @@ import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBPDataSource;
 import org.jkiss.dbeaver.model.exec.DBExecUtils;
+import org.jkiss.dbeaver.model.impl.sql.BasicSQLDialect;
 import org.jkiss.dbeaver.model.preferences.DBPPreferenceStore;
 import org.jkiss.dbeaver.model.runtime.AbstractJob;
 import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
 import org.jkiss.dbeaver.model.runtime.DBRRunnableParametrized;
 import org.jkiss.dbeaver.model.sql.SQLScriptElement;
-import org.jkiss.dbeaver.model.sql.completion.*;
+import org.jkiss.dbeaver.model.sql.completion.SQLCompletionActivityTracker;
+import org.jkiss.dbeaver.model.sql.completion.SQLCompletionAnalyzer;
+import org.jkiss.dbeaver.model.sql.completion.SQLCompletionProposalBase;
+import org.jkiss.dbeaver.model.sql.completion.SQLCompletionRequest;
 import org.jkiss.dbeaver.model.sql.parser.SQLParserPartitions;
 import org.jkiss.dbeaver.model.sql.parser.SQLWordPartDetector;
 import org.jkiss.dbeaver.model.sql.registry.SQLCommandHandlerDescriptor;
 import org.jkiss.dbeaver.model.sql.registry.SQLCommandsRegistry;
+import org.jkiss.dbeaver.model.sql.semantics.completion.SQLQueryCompletionProposal;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.editors.sql.SQLEditorBase;
 import org.jkiss.dbeaver.ui.editors.sql.SQLEditorUtils;
 import org.jkiss.dbeaver.ui.editors.sql.SQLPreferenceConstants;
 import org.jkiss.dbeaver.ui.editors.sql.SQLPreferenceConstants.SQLAutocompletionMode;
-import org.jkiss.dbeaver.ui.editors.sql.semantics.SQLQueryCompletionAnalyzer;
-import org.jkiss.dbeaver.ui.editors.sql.semantics.SQLQueryCompletionProposal;
+import org.jkiss.dbeaver.ui.editors.sql.semantics.SQLEditorQueryCompletionAnalyzer;
 import org.jkiss.dbeaver.ui.editors.sql.templates.SQLContext;
 import org.jkiss.dbeaver.ui.editors.sql.templates.SQLTemplateCompletionProposal;
 import org.jkiss.dbeaver.ui.editors.sql.templates.SQLTemplatesRegistry;
@@ -111,8 +115,10 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
             IRegion line = document.getLineInformationOfOffset(documentOffset);
             if (documentOffset <= line.getLength() + line.getOffset() && line.getLength() > 0) { // we are in the nonempty line
                 String typeAtLine = TextUtilities.getContentType(document, SQLParserPartitions.SQL_PARTITIONING, documentOffset - 1, true);
-                // and previous position belongs to the single-line comment
-                if (SQLParserPartitions.CONTENT_TYPE_SQL_COMMENT.equals(typeAtLine)) {
+                // and previous position belongs to the single-line comment or command
+                if (SQLParserPartitions.CONTENT_TYPE_SQL_COMMENT.equals(typeAtLine)
+                    || SQLParserPartitions.CONTENT_TYPE_SQL_CONTROL.equals(typeAtLine)
+                ) {
                     return new ICompletionProposal[0];
                 }
             }
@@ -174,7 +180,8 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
                     SQLAutocompletionMode mode = SQLAutocompletionMode.fromPreferences(store);
                     boolean useNewCompletionEngine = mode.useNewAnalyzer
                         && store.getBoolean(SQLPreferenceConstants.ADVANCED_HIGHLIGHTING_ENABLE)
-                        && store.getBoolean(SQLPreferenceConstants.READ_METADATA_FOR_SEMANTIC_ANALYSIS);
+                        && store.getBoolean(SQLPreferenceConstants.READ_METADATA_FOR_SEMANTIC_ANALYSIS)
+                        && dataSource != null && dataSource.getSQLDialect() instanceof BasicSQLDialect;
 
                     // UIUtils.waitJobCompletion(..) uses job.isFinished() which is not dropped on reschedule,
                     // so we should be able to recreate the whole job object including all its non-reusable dependencies.
@@ -182,10 +189,10 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
 
                     if (useNewCompletionEngine) {
                         // new analyzer is reusable
-                        SQLQueryCompletionAnalyzer newAnalyzer = new SQLQueryCompletionAnalyzer(
-                            this.editor,
+                        SQLEditorQueryCompletionAnalyzer newAnalyzer = new SQLEditorQueryCompletionAnalyzer(
+                            monitor -> this.editor.obtainCompletionContext(monitor, completionRequestPosition),
                             request,
-                            completionRequestPosition
+                            () -> completionRequestPosition.getOffset()
                         );
                         completionJobSuppliers.add(() -> new ProposalsComputationJobHolder(new NewProposalSearchJob(newAnalyzer)) {
                             @Override
@@ -236,10 +243,11 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
             LinkedHashSet<ICompletionProposal> result = new LinkedHashSet<>(proposals.size());
             if (actualCompletionOffset != request.getDocumentOffset()) {
                 for (Object cp : proposals) {
-                    if (cp instanceof ICompletionProposal proposal && (
-                        (cp instanceof ICompletionProposalExtension2 exp && exp.validate(request.getDocument(), completionRequestPosition.getOffset(), null))
-                        || !(cp instanceof ICompletionProposalExtension2)
-                    )) {
+                    if (cp instanceof ICompletionProposal proposal && ((cp instanceof ICompletionProposalExtension2 exp && exp.validate(
+                        request.getDocument(),
+                        completionRequestPosition.getOffset(),
+                        null
+                    )) || !(cp instanceof ICompletionProposalExtension2))) {
                         result.add(proposal);
                     }
                 }
@@ -250,7 +258,7 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
                     }
                 }
             }
-            this.contentAssistant.setLastCompletionOffset(actualCompletionOffset);
+            this.contentAssistant.setCompletionRegionOffset(actualCompletionOffset);
             return ArrayUtils.toArray(ICompletionProposal.class, result);
         } finally {
             document.removePosition(completionRequestPosition);
@@ -448,7 +456,7 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
         @Override
         public void assistSessionEnded(ContentAssistEvent event) {
             simpleMode = false;
-            contentAssistant.setLastCompletionOffset(-1);
+            contentAssistant.clearCompletionRegion();
         }
 
         @Override
@@ -506,8 +514,9 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
             setUser(false);
         }
 
+        @NotNull
         @Override
-        protected IStatus run(DBRProgressMonitor monitor) {
+        protected IStatus run(@NotNull DBRProgressMonitor monitor) {
             try {
                 monitor.beginTask("Seeking for SQL completion proposals", 1);
                 try {
@@ -525,14 +534,15 @@ public class SQLCompletionProcessor implements IContentAssistProcessor {
     }
 
     private class NewProposalSearchJob extends AbstractJob {
-        private final SQLQueryCompletionAnalyzer analyzer;
+        private final SQLEditorQueryCompletionAnalyzer analyzer;
 
-        public NewProposalSearchJob(SQLQueryCompletionAnalyzer analyzer) {
+        public NewProposalSearchJob(SQLEditorQueryCompletionAnalyzer analyzer) {
             super("Analyzing query for proposals...");
             this.analyzer = analyzer;
         }
+        @NotNull
         @Override
-        protected IStatus run(DBRProgressMonitor monitor) {
+        protected IStatus run(@NotNull DBRProgressMonitor monitor) {
             try {
                 monitor.beginTask("Seeking for SQL completion proposals", 2);
                 monitor.worked(1);
